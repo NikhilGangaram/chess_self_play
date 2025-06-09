@@ -1,277 +1,187 @@
 import chess
+import chess.polyglot
 import random
 from typing import Optional, Dict, List, Tuple
 
 class MinimaxAgent:
-    def __init__(self, depth: int = 4):
+    def __init__(self, depth: int = 3):
+        """
+        Initialize the agent with a depth and a pre-built opening book
+        that plays a fixed sequence of 10 moves regardless of opponent moves.
+        """
         self.depth = depth
+        self.transposition_table: Dict[int, Tuple[int, int, chess.Move]] = {}
+
+        # --- Fixed opening sequence (7 moves) ---
+        self.opening_moves_white = [
+            "e2e4",  # Move 1: King's pawn
+            "d2d4",  # Move 2: Queen's pawn  
+            "b1c3",  # Move 3: Knight development
+            "g1f3",  # Move 4: Knight development
+            "f1c4",  # Move 5: Bishop development
+            "e1g1",  # Move 6: Castle kingside
+            "a2a3",  # Move 7: Prepare b4
+        ]
+        self.opening_moves_black = [
+            "e7e5",  # Move 1: King's pawn
+            "d7d5",  # Move 2: Queen's pawn  
+            "b8c6",  # Move 3: Knight development
+            "g8f6",  # Move 4: Knight development
+            "f8c5",  # Move 5: Bishop development
+            "e8g8",  # Move 6: Castle kingside
+            "a7a6",  # Move 7: Prepare b5
+        ]
+        self.move_count = 0  # Track how many moves this agent has made
+
+        # --- Piece Values ---
         self.piece_values = {
-            chess.PAWN: 100,
-            chess.KNIGHT: 320,
-            chess.BISHOP: 330,
-            chess.ROOK: 500,
-            chess.QUEEN: 900,
-            chess.KING: 20000
+            chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
+            chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20000
         }
-        
-        # Enhanced position tables
+
+        # --- Piece-Square Tables ---
         self.pawn_table = [
-            0,  0,  0,  0,  0,  0,  0,  0,
-            50, 50, 50, 50, 50, 50, 50, 50,
-            10, 10, 20, 30, 30, 20, 10, 10,
-            5,  5, 10, 27, 27, 10,  5,  5,
-            0,  0,  0, 25, 25,  0,  0,  0,
-            5, -5,-10,  0,  0,-10, -5,  5,
-            5, 10, 10,-25,-25, 10, 10,  5,
-            0,  0,  0,  0,  0,  0,  0,  0
+              0,  0,  0,  0,  0,  0,  0,  0,
+             50, 50, 50, 50, 50, 50, 50, 50,
+             10, 10, 20, 30, 30, 20, 10, 10,
+              5,  5, 10, 25, 25, 10,  5,  5,
+              0,  0,  0, 20, 20,  0,  0,  0,
+              5, -5,-10,  0,  0,-10, -5,  5,
+              5, 10, 10,-20,-20, 10, 10,  5,
+              0,  0,  0,  0,  0,  0,  0,  0
         ]
-        
-        self.knight_table = [
-            -50,-40,-30,-30,-30,-30,-40,-50,
-            -40,-20,  0,  0,  0,  0,-20,-40,
-            -30,  0, 10, 15, 15, 10,  0,-30,
-            -30,  5, 15, 20, 20, 15,  5,-30,
-            -30,  0, 15, 20, 20, 15,  0,-30,
-            -30,  5, 10, 15, 15, 10,  5,-30,
-            -40,-20,  0,  5,  5,  0,-20,-40,
-            -50,-40,-30,-30,-30,-30,-40,-50,
-        ]
-        
-        self.bishop_table = [
-            -20,-10,-10,-10,-10,-10,-10,-20,
-            -10,  0,  0,  0,  0,  0,  0,-10,
-            -10,  0,  5, 10, 10,  5,  0,-10,
-            -10,  5,  5, 10, 10,  5,  5,-10,
-            -10,  0, 10, 10, 10, 10,  0,-10,
-            -10, 10, 10, 10, 10, 10, 10,-10,
-            -10,  5,  0,  0,  0,  0,  5,-10,
-            -20,-10,-10,-10,-10,-10,-10,-20,
-        ]
-        
-        self.rook_table = [
-            0,  0,  0,  0,  0,  0,  0,  0,
-            5, 10, 10, 10, 10, 10, 10,  5,
-            -5,  0,  0,  0,  0,  0,  0, -5,
-            -5,  0,  0,  0,  0,  0,  0, -5,
-            -5,  0,  0,  0,  0,  0,  0, -5,
-            -5,  0,  0,  0,  0,  0,  0, -5,
-            -5,  0,  0,  0,  0,  0,  0, -5,
-            0,  0,  0,  5,  5,  0,  0,  0
-        ]
-        
-        # Opening book - solid, classical openings
-        self.opening_book = {
-            # Italian Game
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1": ["e2e4"],
-            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2": ["g1f3"],
-            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3": ["f1c4"],
-            "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4": ["d2d3", "c2c3"],
-            
-            # Ruy Lopez
-            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3": ["f1b5"],
-            "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3": ["a7a6"],
-            "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4": ["b5a4"],
-            
-            # Queen's Gambit
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1": ["d2d4"],
-            "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2": ["c2c4"],
-            "rnbqkbnr/ppp2ppp/8/3pp3/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3": ["b1c3", "g1f3"],
-            
-            # Sicilian Defense (for Black)
-            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2": ["g1f3"],
-            "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2": ["g1f3"],
-            
-            # King's Indian Defense
-            "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2": ["g1f3"],
-            "rnbqkb1r/ppp1pp1p/5np1/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 0 4": ["c2c4"],
-        }
-    
+        self.knight_table = [-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,  0,  5,  5,  0,-20,-40,-30,  5, 10, 15, 15, 10,  5,-30,-30,  0, 15, 20, 20, 15,  0,-30,-30,  5, 15, 20, 20, 15,  5,-30,-30,  0, 10, 15, 15, 10,  0,-30,-40,-20,  0,  0,  0,  0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50]
+        self.bishop_table = [-20,-10,-10,-10,-10,-10,-10,-20,-10,  0,  0,  0,  0,  0,  0,-10,-10,  0,  5, 10, 10,  5,  0,-10,-10,  5,  5, 10, 10,  5,  5,-10,-10,  0, 10, 10, 10, 10,  0,-10,-10, 10, 10, 10, 10, 10, 10,-10,-10,  5,  0,  0,  0,  0,  5,-10,-20,-10,-10,-10,-10,-10,-10,-20]
+        self.rook_table = [ 0,  0,  0,  5,  5,  0,  0,  0,-5,  0,  0,  0,  0,  0,  0, -5,-5,  0,  0,  0,  0,  0,  0, -5,-5,  0,  0,  0,  0,  0,  0, -5,-5,  0,  0,  0,  0,  0,  0, -5,-5,  0,  0,  0,  0,  0,  0, -5, 5, 10, 10, 10, 10, 10, 10,  5, 0,  0,  0,  0,  0,  0,  0,  0]
+        self.queen_table = [-20,-10,-10, -5, -5,-10,-10,-20,-10,  0,  0,  0,  0,  0,  0,-10,-10,  0,  5,  5,  5,  5,  0,-10, -5,  0,  5,  5,  5,  5,  0, -5,  0,  0,  5,  5,  5,  5,  0, -5,-10,  5,  5,  5,  5,  5,  0,-10,-10,  0,  5,  0,  0,  0,  0,-10,-20,-10,-10, -5, -5,-10,-10,-20]
+        self.king_mg_table = [-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-20,-30,-30,-40,-40,-30,-30,-20,-10,-20,-20,-20,-20,-20,-20,-10, 20, 20,  0,  0,  0,  0, 20, 20, 20, 30, 10,  0,  0, 10, 30, 20]
+        self.king_eg_table = [-50,-40,-30,-20,-20,-30,-40,-50,-30,-20,-10,  0,  0,-10,-20,-30,-30,-10, 20, 30, 30, 20,-10,-30,-30,-10, 30, 40, 40, 30,-10,-30,-30,-10, 30, 40, 40, 30,-10,-30,-30,-10, 20, 30, 30, 20,-10,-30,-30,-30,  0,  0,  0,  0,-30,-30,-50,-30,-30,-30,-30,-30,-30,-50]
+
     def get_opening_move(self, board: chess.Board) -> Optional[chess.Move]:
-        """Get a move from the opening book if available"""
-        board_fen = board.fen()
-        
-        # Check if current position is in opening book
-        if board_fen in self.opening_book:
-            move_options = self.opening_book[board_fen]
-            move_uci = random.choice(move_options)
-            try:
-                move = chess.Move.from_uci(move_uci)
-                if move in board.legal_moves:
-                    return move
-            except:
-                pass
+        """
+        Get the next move from our fixed opening sequence based on whose turn it is.
+        """
+        if self.move_count < 7:  # First 7 moves from opening book
+            # Choose the appropriate move list based on which color is to move
+            if board.turn == chess.WHITE:
+                move_uci = self.opening_moves_white[self.move_count]
+            else:
+                move_uci = self.opening_moves_black[self.move_count]
+            
+            move = chess.Move.from_uci(move_uci)
+            
+            if move in board.legal_moves:
+                self.move_count += 1
+                return move
         
         return None
-    
-    def order_moves(self, board: chess.Board, moves: List[chess.Move]) -> List[chess.Move]:
-        """Order moves for better alpha-beta pruning (best moves first)"""
-        def move_priority(move):
-            priority = 0
-            
-            # Captures (highest priority)
-            if board.is_capture(move):
-                captured_piece = board.piece_at(move.to_square)
-                if captured_piece:
-                    # MVV-LVA: Most Valuable Victim - Least Valuable Attacker
-                    attacker_value = self.piece_values.get(board.piece_at(move.from_square).piece_type, 0)
-                    victim_value = self.piece_values.get(captured_piece.piece_type, 0)
-                    priority += 10000 + victim_value - attacker_value
-            
-            # Checks
-            board.push(move)
-            if board.is_check():
-                priority += 5000
-            board.pop()
-            
-            # Promotions
-            if move.promotion:
-                priority += 8000
-            
-            # Castle
-            if board.is_castling(move):
-                priority += 3000
-            
-            # Central squares
-            to_square = move.to_square
-            if to_square in [chess.E4, chess.E5, chess.D4, chess.D5]:
-                priority += 100
-            elif to_square in [chess.C4, chess.C5, chess.F4, chess.F5,
-                             chess.D3, chess.D6, chess.E3, chess.E6]:
-                priority += 50
-            
-            return priority
-        
-        return sorted(moves, key=move_priority, reverse=True)
-    
-    def evaluate_board(self, board: chess.Board) -> float:
-        """Enhanced board evaluation"""
-        if board.is_checkmate():
-            return -999999 if board.turn else 999999
-        
-        if board.is_stalemate() or board.is_insufficient_material():
-            return 0
-        
-        score = 0
-        
-        # Material and positional evaluation
+
+    def get_game_phase(self, board: chess.Board) -> float:
+        piece_count = 0
+        for piece_type in [chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]:
+            piece_count += len(board.pieces(piece_type, chess.WHITE))
+            piece_count += len(board.pieces(piece_type, chess.BLACK))
+        phase = max(0, 24 - piece_count) / 24.0
+        return phase
+
+    def evaluate_board(self, board: chess.Board) -> int:
+        if board.is_checkmate(): return -99999 if board.turn else 99999
+        if board.is_stalemate() or board.is_insufficient_material(): return 0
+        game_phase = self.get_game_phase(board)
+        white_eval = 0
+        black_eval = 0
         for square in chess.SQUARES:
             piece = board.piece_at(square)
-            if piece is None:
-                continue
-                
-            piece_value = self.piece_values[piece.piece_type]
-            
-            # Positional bonuses
-            position_bonus = 0
-            if piece.piece_type == chess.PAWN:
-                position_bonus = self.pawn_table[square if piece.color else 63 - square]
-            elif piece.piece_type == chess.KNIGHT:
-                position_bonus = self.knight_table[square if piece.color else 63 - square]
-            elif piece.piece_type == chess.BISHOP:
-                position_bonus = self.bishop_table[square if piece.color else 63 - square]
-            elif piece.piece_type == chess.ROOK:
-                position_bonus = self.rook_table[square if piece.color else 63 - square]
-            
-            total_value = piece_value + position_bonus
-            
-            if piece.color == chess.WHITE:
-                score += total_value
+            if piece is None: continue
+            value = self.piece_values[piece.piece_type]
+            if piece.piece_type == chess.PAWN: pos_value = self.pawn_table[square]
+            elif piece.piece_type == chess.KNIGHT: pos_value = self.knight_table[square]
+            elif piece.piece_type == chess.BISHOP: pos_value = self.bishop_table[square]
+            elif piece.piece_type == chess.ROOK: pos_value = self.rook_table[square]
+            elif piece.piece_type == chess.QUEEN: pos_value = self.queen_table[square]
+            elif piece.piece_type == chess.KING:
+                mg_value = self.king_mg_table[square]
+                eg_value = self.king_eg_table[square]
+                pos_value = int((1 - game_phase) * mg_value + game_phase * eg_value)
+            if piece.color == chess.WHITE: white_eval += value + pos_value
             else:
-                score -= total_value
-        
-        # King safety
-        white_king_square = board.king(chess.WHITE)
-        black_king_square = board.king(chess.BLACK)
-        
-        if white_king_square and black_king_square:
-            # Penalize exposed kings in endgame
-            piece_count = len(board.piece_map())
-            if piece_count < 12:  # Endgame
-                # King should be active in endgame
-                white_king_center_distance = abs(chess.square_file(white_king_square) - 3.5) + abs(chess.square_rank(white_king_square) - 3.5)
-                black_king_center_distance = abs(chess.square_file(black_king_square) - 3.5) + abs(chess.square_rank(black_king_square) - 3.5)
-                score -= white_king_center_distance * 10
-                score += black_king_center_distance * 10
-        
-        # Mobility bonus
-        legal_moves_count = len(list(board.legal_moves))
-        if board.turn == chess.WHITE:
-            score += legal_moves_count * 10
-        else:
-            score -= legal_moves_count * 10
-        
-        # Check bonus
-        if board.is_check():
-            score += 50 if board.turn == chess.BLACK else -50
-        
-        return score
-    
-    def minimax(self, board: chess.Board, depth: int, alpha: float, beta: float, maximizing: bool) -> float:
-        """Enhanced minimax with move ordering"""
+                flipped_square = chess.square_mirror(square)
+                if piece.piece_type == chess.PAWN: pos_value = self.pawn_table[flipped_square]
+                elif piece.piece_type == chess.KNIGHT: pos_value = self.knight_table[flipped_square]
+                elif piece.piece_type == chess.BISHOP: pos_value = self.bishop_table[flipped_square]
+                elif piece.piece_type == chess.ROOK: pos_value = self.rook_table[flipped_square]
+                elif piece.piece_type == chess.QUEEN: pos_value = self.queen_table[flipped_square]
+                elif piece.piece_type == chess.KING:
+                    mg_value = self.king_mg_table[flipped_square]
+                    eg_value = self.king_eg_table[flipped_square]
+                    pos_value = int((1 - game_phase) * mg_value + game_phase * eg_value)
+                black_eval += value + pos_value
+        score = white_eval - black_eval
+        return score if board.turn == chess.WHITE else -score
+
+    def order_moves(self, board: chess.Board) -> List[chess.Move]:
+        moves = list(board.legal_moves)
+        def move_score(move):
+            score = 0
+            if board.is_capture(move):
+                victim = board.piece_at(move.to_square)
+                attacker = board.piece_at(move.from_square)
+                if victim and attacker: score += 10 * self.piece_values[victim.piece_type] - self.piece_values[attacker.piece_type]
+            if move.promotion: score += self.piece_values[move.promotion]
+            return score
+        return sorted(moves, key=move_score, reverse=True)
+
+    def quiescence_search(self, board: chess.Board, alpha: float, beta: float) -> int:
+        stand_pat_score = self.evaluate_board(board)
+        if stand_pat_score >= beta: return beta
+        if alpha < stand_pat_score: alpha = stand_pat_score
+        capture_moves = [move for move in self.order_moves(board) if board.is_capture(move) or move.promotion]
+        for move in capture_moves:
+            board.push(move)
+            score = -self.quiescence_search(board, -beta, -alpha)
+            board.pop()
+            if score >= beta: return beta
+            if score > alpha: alpha = score
+        return alpha
+
+    def minimax(self, board: chess.Board, depth: int, alpha: float, beta: float) -> Tuple[int, Optional[chess.Move]]:
+        alpha_orig = alpha
+        zobrist_hash = chess.polyglot.zobrist_hash(board)
+        if zobrist_hash in self.transposition_table:
+            stored_depth, stored_score, stored_move = self.transposition_table[zobrist_hash]
+            if stored_depth >= depth: return stored_score, stored_move
         if depth == 0 or board.is_game_over():
-            return self.evaluate_board(board)
-        
-        legal_moves = list(board.legal_moves)
-        legal_moves = self.order_moves(board, legal_moves)  # Move ordering for better pruning
-        
-        if maximizing:
-            max_eval = float('-inf')
-            for move in legal_moves:
-                board.push(move)
-                eval_score = self.minimax(board, depth - 1, alpha, beta, False)
-                board.pop()
-                max_eval = max(max_eval, eval_score)
-                alpha = max(alpha, eval_score)
-                if beta <= alpha:
-                    break  # Alpha-beta pruning
-            return max_eval
-        else:
-            min_eval = float('inf')
-            for move in legal_moves:
-                board.push(move)
-                eval_score = self.minimax(board, depth - 1, alpha, beta, True)
-                board.pop()
-                min_eval = min(min_eval, eval_score)
-                beta = min(beta, eval_score)
-                if beta <= alpha:
-                    break  # Alpha-beta pruning
-            return min_eval
-    
+            score = self.quiescence_search(board, alpha, beta)
+            return score, None
+        best_move = None
+        max_eval = float('-inf')
+        for move in self.order_moves(board):
+            board.push(move)
+            eval_score, _ = self.minimax(board, depth - 1, -beta, -alpha)
+            eval_score = -eval_score
+            board.pop()
+            if eval_score > max_eval:
+                max_eval = eval_score
+                best_move = move
+            alpha = max(alpha, eval_score)
+            if alpha >= beta: break
+        self.transposition_table[zobrist_hash] = (depth, max_eval, best_move)
+        return max_eval, best_move
+
     def get_best_move(self, board: chess.Board) -> Optional[chess.Move]:
-        """Get the best move, using opening book first, then search"""
         if board.is_game_over():
             return None
-        
-        # Try opening book first (for first ~10 moves)
-        if board.fullmove_number <= 10:
+
+        # --- ENFORCE OPENING BOOK ---
+        if self.move_count < 7:
             opening_move = self.get_opening_move(board)
             if opening_move:
+                print(f"Agent plays '{opening_move.uci()}' from its opening book.")
                 return opening_move
-        
-        # Fall back to minimax search
-        legal_moves = list(board.legal_moves)
-        if not legal_moves:
-            return None
-        
-        # Order moves for better search
-        legal_moves = self.order_moves(board, legal_moves)
-        
-        best_move = None
-        best_value = float('-inf') if board.turn == chess.WHITE else float('inf')
-        
-        for move in legal_moves:
-            board.push(move)
-            move_value = self.minimax(board, self.depth - 1, float('-inf'), float('inf'), 
-                                    not board.turn)
-            board.pop()
-            
-            if board.turn == chess.WHITE:  # Maximizing for white
-                if move_value > best_value:
-                    best_value = move_value
-                    best_move = move
-            else:  # Minimizing for black
-                if move_value < best_value:
-                    best_value = move_value
-                    best_move = move
-        
-        return best_move 
+
+        # --- FALLBACK TO MINIMAX SEARCH ---
+        print("Agent is thinking... (using minimax search)")
+        self.transposition_table.clear()
+        _, best_move = self.minimax(board, self.depth, float('-inf'), float('inf'))
+
+        return best_move
