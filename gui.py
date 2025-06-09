@@ -6,6 +6,7 @@ from PyQt6.QtGui import QMouseEvent
 import chess
 import chess.svg
 from agents.minimax_agent import MinimaxAgent
+from agents.mcts_agent import MCTSAgent
 
 class ClickableSvgWidget(QSvgWidget):
     def __init__(self, parent=None):
@@ -47,7 +48,15 @@ class ChessGUI(QMainWindow):
         self.legal_moves = []
         
         # AI and game mode
-        self.ai = MinimaxAgent(depth=3)
+        self.ai_white = None
+        self.ai_black = None
+        self.agent_types = {
+            "Minimax Agent": {"class": MinimaxAgent, "params": {"depth": 5}},
+            "MCTS Agent": {"class": MCTSAgent, "params": {"time_limit": 3.0, "max_iterations": 5000}}
+        }
+        self.selected_agent = "Minimax Agent"
+        self.selected_agent_white = "Minimax Agent"
+        self.selected_agent_black = "Minimax Agent"
         self.game_mode = "Human vs Human"  # "Human vs Human", "Human vs AI", "AI vs AI"
         self.human_color = chess.WHITE  # For Human vs AI mode
         self.ai_thinking = False
@@ -64,22 +73,52 @@ class ChessGUI(QMainWindow):
         layout = QVBoxLayout(central_widget)
         
         # Game mode selection
-        mode_group = QGroupBox("")
-        mode_layout = QHBoxLayout(mode_group)
+        mode_group = QGroupBox("Game Configuration")
+        mode_layout = QVBoxLayout(mode_group)
         
+        # First row: Mode and color selection
+        mode_row = QHBoxLayout()
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Human vs Human", "Human vs AI", "AI vs AI"])
         self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
-        mode_layout.addWidget(QLabel("Mode:"))
-        mode_layout.addWidget(self.mode_combo)
+        mode_row.addWidget(QLabel("Mode:"))
+        mode_row.addWidget(self.mode_combo)
         
         self.color_combo = QComboBox()
         self.color_combo.addItems(["Play as White", "Play as Black"])
         self.color_combo.currentTextChanged.connect(self.on_color_changed)
         self.color_combo.setEnabled(False)  # Initially disabled
-        mode_layout.addWidget(QLabel("Color:"))
-        mode_layout.addWidget(self.color_combo)
+        mode_row.addWidget(QLabel("Color:"))
+        mode_row.addWidget(self.color_combo)
+        mode_layout.addLayout(mode_row)
         
+        # Second row: AI agent selection
+        agent_row = QHBoxLayout()
+        
+        # Single agent selector (for Human vs AI)
+        self.agent_combo = QComboBox()
+        self.agent_combo.addItems(list(self.agent_types.keys()))
+        self.agent_combo.currentTextChanged.connect(self.on_agent_changed)
+        self.agent_combo.setEnabled(False)  # Initially disabled
+        agent_row.addWidget(QLabel("AI Agent:"))
+        agent_row.addWidget(self.agent_combo)
+        
+        # Separate agent selectors (for AI vs AI)
+        self.agent_white_combo = QComboBox()
+        self.agent_white_combo.addItems(list(self.agent_types.keys()))
+        self.agent_white_combo.currentTextChanged.connect(self.on_agent_white_changed)
+        self.agent_white_combo.setEnabled(False)  # Initially disabled
+        agent_row.addWidget(QLabel("White AI:"))
+        agent_row.addWidget(self.agent_white_combo)
+        
+        self.agent_black_combo = QComboBox()
+        self.agent_black_combo.addItems(list(self.agent_types.keys()))
+        self.agent_black_combo.currentTextChanged.connect(self.on_agent_black_changed)
+        self.agent_black_combo.setEnabled(False)  # Initially disabled
+        agent_row.addWidget(QLabel("Black AI:"))
+        agent_row.addWidget(self.agent_black_combo)
+        
+        mode_layout.addLayout(agent_row)
         layout.addWidget(mode_group)
         
         # SVG Widget for the chess board
@@ -151,10 +190,19 @@ class ChessGUI(QMainWindow):
     def on_mode_changed(self, mode):
         """Handle game mode changes"""
         self.game_mode = mode
+        
+        # Enable/disable controls based on mode
         self.color_combo.setEnabled(mode == "Human vs AI")
+        self.agent_combo.setEnabled(mode == "Human vs AI")
+        self.agent_white_combo.setEnabled(mode == "AI vs AI")
+        self.agent_black_combo.setEnabled(mode == "AI vs AI")
         
         if mode == "Human vs AI":
             self.on_color_changed(self.color_combo.currentText())
+            self.on_agent_changed(self.agent_combo.currentText())
+        elif mode == "AI vs AI":
+            self.on_agent_white_changed(self.agent_white_combo.currentText())
+            self.on_agent_black_changed(self.agent_black_combo.currentText())
         
         self.reset_game()
     
@@ -162,6 +210,45 @@ class ChessGUI(QMainWindow):
         """Handle color selection for Human vs AI mode"""
         self.human_color = chess.WHITE if color_text == "Play as White" else chess.BLACK
         self.reset_game()
+    
+    def on_agent_changed(self, agent_name):
+        """Handle AI agent selection for Human vs AI mode"""
+        self.selected_agent = agent_name
+        self.reset_game()
+    
+    def on_agent_white_changed(self, agent_name):
+        """Handle White AI agent selection for AI vs AI mode"""
+        self.selected_agent_white = agent_name
+        self.reset_game()
+    
+    def on_agent_black_changed(self, agent_name):
+        """Handle Black AI agent selection for AI vs AI mode"""
+        self.selected_agent_black = agent_name
+        self.reset_game()
+    
+    def create_agent(self, agent_name):
+        """Create an AI agent instance based on the agent name"""
+        agent_info = self.agent_types[agent_name]
+        agent_class = agent_info["class"]
+        agent_params = agent_info["params"]
+        return agent_class(**agent_params)
+    
+    def get_current_ai(self):
+        """Get the appropriate AI agent for the current turn"""
+        if self.game_mode == "Human vs AI":
+            if not hasattr(self, 'ai_single') or self.ai_single is None:
+                self.ai_single = self.create_agent(self.selected_agent)
+            return self.ai_single
+        elif self.game_mode == "AI vs AI":
+            if self.board.turn == chess.WHITE:
+                if self.ai_white is None:
+                    self.ai_white = self.create_agent(self.selected_agent_white)
+                return self.ai_white
+            else:
+                if self.ai_black is None:
+                    self.ai_black = self.create_agent(self.selected_agent_black)
+                return self.ai_black
+        return None
     
     def is_human_turn(self):
         """Check if it's the human's turn"""
@@ -186,11 +273,27 @@ class ChessGUI(QMainWindow):
             self.ai_thinking = False
             return
         
-        best_move = self.ai.get_best_move(self.board)
+        current_ai = self.get_current_ai()
+        if current_ai is None:
+            self.ai_thinking = False
+            return
+        
+        # Get agent name for display
+        if self.game_mode == "Human vs AI":
+            agent_name = self.selected_agent
+        elif self.board.turn == chess.WHITE:
+            agent_name = self.selected_agent_white
+        else:
+            agent_name = self.selected_agent_black
+        
+        best_move = current_ai.get_best_move(self.board)
         if best_move:
             move_notation = self.board.san(best_move)  # Get notation before pushing
             self.board.push(best_move)
-            self.status_label.setText(f"AI played: {move_notation}")
+            
+            color = "White" if not self.board.turn else "Black"  # Color that just moved
+            self.status_label.setText(f"{color} {agent_name} played: {move_notation}")
+            
             self.selected_square = None
             self.legal_moves = []
             self.update_board()
@@ -321,6 +424,12 @@ class ChessGUI(QMainWindow):
         self.ai_thinking = False
         self.ai_timer.stop()
         
+        # Reset AI agents to create fresh instances
+        self.ai_white = None
+        self.ai_black = None
+        if hasattr(self, 'ai_single'):
+            self.ai_single = None
+        
         # Reset pause state
         self.game_paused = False
         self.pause_btn.setText("Pause")
@@ -328,10 +437,12 @@ class ChessGUI(QMainWindow):
         if self.game_mode == "Human vs Human":
             self.status_label.setText("Game reset. Click a piece to see its moves.")
         elif self.game_mode == "AI vs AI":
-            self.status_label.setText("Game reset. AI vs AI mode - Watch them play!")
+            white_agent = self.selected_agent_white
+            black_agent = self.selected_agent_black
+            self.status_label.setText(f"Game reset. {white_agent} (White) vs {black_agent} (Black) - Watch them play!")
         else:  # Human vs AI
             color_str = "White" if self.human_color == chess.WHITE else "Black"
-            self.status_label.setText(f"Game reset. You are playing as {color_str}")
+            self.status_label.setText(f"Game reset. You are playing as {color_str} vs {self.selected_agent}")
         
         self.update_board()
         self.update_info()
