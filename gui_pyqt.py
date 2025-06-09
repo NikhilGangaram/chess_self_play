@@ -1,10 +1,11 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel
+from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel, QComboBox, QGroupBox
 from PyQt6.QtSvgWidgets import QSvgWidget
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QMouseEvent
 import chess
 import chess.svg
+from agents.minimax_agent import MinimaxAgent
 
 class ClickableSvgWidget(QSvgWidget):
     def __init__(self, parent=None):
@@ -38,23 +39,48 @@ class ChessGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Chess Board GUI - PyQt")
-        self.setGeometry(100, 100, 600, 700)
+        self.setGeometry(100, 100, 600, 800)
         
         # Game state
         self.board = chess.Board()
         self.selected_square = None
         self.legal_moves = []
         
+        # AI and game mode
+        self.ai = MinimaxAgent(depth=3)
+        self.game_mode = "Human vs Human"  # "Human vs Human", "Human vs AI", "AI vs AI"
+        self.human_color = chess.WHITE  # For Human vs AI mode
+        self.ai_thinking = False
+        self.game_paused = False
+        
+        # Timer for AI moves
+        self.ai_timer = QTimer()
+        self.ai_timer.timeout.connect(self.make_ai_move)
+        self.ai_timer.setSingleShot(True)
+        
         # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
-        # Title
-        title = QLabel("Chess Board Visualization")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title)
+        # Game mode selection
+        mode_group = QGroupBox("")
+        mode_layout = QHBoxLayout(mode_group)
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Human vs Human", "Human vs AI", "AI vs AI"])
+        self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
+        mode_layout.addWidget(QLabel("Mode:"))
+        mode_layout.addWidget(self.mode_combo)
+        
+        self.color_combo = QComboBox()
+        self.color_combo.addItems(["Play as White", "Play as Black"])
+        self.color_combo.currentTextChanged.connect(self.on_color_changed)
+        self.color_combo.setEnabled(False)  # Initially disabled
+        mode_layout.addWidget(QLabel("Color:"))
+        mode_layout.addWidget(self.color_combo)
+        
+        layout.addWidget(mode_group)
         
         # SVG Widget for the chess board
         self.svg_widget = ClickableSvgWidget(self)
@@ -71,6 +97,10 @@ class ChessGUI(QMainWindow):
         reset_btn = QPushButton("Reset Game")
         reset_btn.clicked.connect(self.reset_game)
         button_layout.addWidget(reset_btn)
+        
+        self.pause_btn = QPushButton("Pause")
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        button_layout.addWidget(self.pause_btn)
         
         export_btn = QPushButton("Export SVG")
         export_btn.clicked.connect(self.export_svg)
@@ -93,9 +123,90 @@ class ChessGUI(QMainWindow):
         # Initial board render
         self.update_board()
         self.update_info()
+        
+        # Start AI if needed
+        self.check_ai_turn()
     
+    def toggle_pause(self):
+        """Toggle game pause state"""
+        self.game_paused = not self.game_paused
+        
+        if self.game_paused:
+            self.pause_btn.setText("Resume")
+            self.ai_timer.stop()  # Stop AI timer if running
+            self.status_label.setText("Game Paused - Click Resume to continue")
+        else:
+            self.pause_btn.setText("Pause")
+            if self.game_mode == "Human vs Human":
+                self.status_label.setText("Game resumed. Click a piece to see its moves.")
+            elif self.game_mode == "AI vs AI":
+                self.status_label.setText("Game resumed. AI vs AI mode - Watch them play!")
+            else:  # Human vs AI
+                color_str = "White" if self.human_color == chess.WHITE else "Black"
+                self.status_label.setText(f"Game resumed. You are playing as {color_str}")
+            
+            # Check if AI should move after resuming
+            self.check_ai_turn()
+
+    def on_mode_changed(self, mode):
+        """Handle game mode changes"""
+        self.game_mode = mode
+        self.color_combo.setEnabled(mode == "Human vs AI")
+        
+        if mode == "Human vs AI":
+            self.on_color_changed(self.color_combo.currentText())
+        
+        self.reset_game()
+    
+    def on_color_changed(self, color_text):
+        """Handle color selection for Human vs AI mode"""
+        self.human_color = chess.WHITE if color_text == "Play as White" else chess.BLACK
+        self.reset_game()
+    
+    def is_human_turn(self):
+        """Check if it's the human's turn"""
+        if self.game_mode == "Human vs Human":
+            return True
+        elif self.game_mode == "AI vs AI":
+            return False
+        else:  # Human vs AI
+            return self.board.turn == self.human_color
+    
+    def check_ai_turn(self):
+        """Check if AI should make a move and schedule it"""
+        if (not self.game_paused and not self.is_human_turn() and 
+            not self.board.is_game_over() and not self.ai_thinking):
+            self.ai_thinking = True
+            self.status_label.setText("AI is thinking...")
+            self.ai_timer.start(500)  # Small delay to show "thinking" message
+    
+    def make_ai_move(self):
+        """Make an AI move"""
+        if self.board.is_game_over():
+            self.ai_thinking = False
+            return
+        
+        best_move = self.ai.get_best_move(self.board)
+        if best_move:
+            move_notation = self.board.san(best_move)  # Get notation before pushing
+            self.board.push(best_move)
+            self.status_label.setText(f"AI played: {move_notation}")
+            self.selected_square = None
+            self.legal_moves = []
+            self.update_board()
+            self.update_info()
+        
+        self.ai_thinking = False
+        
+        # Check if AI should make another move (for AI vs AI)
+        self.check_ai_turn()
+
     def on_square_clicked(self, square):
         """Handle square clicks for piece selection and movement"""
+        # Don't allow human interaction during AI thinking, when it's not human's turn, or when paused
+        if self.ai_thinking or not self.is_human_turn() or self.game_paused:
+            return
+            
         piece = self.board.piece_at(square)
         
         # If we have a piece selected and this click is a legal move
@@ -111,17 +222,22 @@ class ChessGUI(QMainWindow):
             
             # Try to make the move
             if move in self.board.legal_moves:
+                move_notation = self.board.san(move)  # Get notation before pushing
                 self.board.push(move)
                 self.selected_square = None
                 self.legal_moves = []
-                self.status_label.setText(f"Moved to {chess.square_name(square)}")
+                self.status_label.setText(f"Played: {move_notation}")
                 self.update_board()
                 self.update_info()
+                
+                # Check if AI should move next
+                self.check_ai_turn()
                 return
             else:
                 # Invalid move, but check if clicking on own piece
                 if piece and piece.color == self.board.turn:
                     self.select_piece(square, piece)
+                    self.update_board()
                     return
                 else:
                     # Deselect
@@ -202,9 +318,26 @@ class ChessGUI(QMainWindow):
         self.board = chess.Board()
         self.selected_square = None
         self.legal_moves = []
-        self.status_label.setText("Game reset. Click a piece to see its moves.")
+        self.ai_thinking = False
+        self.ai_timer.stop()
+        
+        # Reset pause state
+        self.game_paused = False
+        self.pause_btn.setText("Pause")
+        
+        if self.game_mode == "Human vs Human":
+            self.status_label.setText("Game reset. Click a piece to see its moves.")
+        elif self.game_mode == "AI vs AI":
+            self.status_label.setText("Game reset. AI vs AI mode - Watch them play!")
+        else:  # Human vs AI
+            color_str = "White" if self.human_color == chess.WHITE else "Black"
+            self.status_label.setText(f"Game reset. You are playing as {color_str}")
+        
         self.update_board()
         self.update_info()
+        
+        # Start AI if needed
+        self.check_ai_turn()
     
     def export_svg(self):
         """Export current board as SVG file"""
