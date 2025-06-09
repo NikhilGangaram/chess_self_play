@@ -4,7 +4,7 @@ import random
 from typing import Optional, Dict, List, Tuple
 
 class MinimaxAgent:
-    def __init__(self, depth: int = 3):
+    def __init__(self, depth: int = 5):
         """
         Initialize the agent with a depth and a pre-built opening book
         that plays a fixed sequence of 10 moves regardless of opponent moves.
@@ -31,7 +31,6 @@ class MinimaxAgent:
             "e8g8",  # Move 6: Castle kingside
             "a7a6",  # Move 7: Prepare b5
         ]
-        self.move_count = 0  # Track how many moves this agent has made
 
         # --- Piece Values ---
         self.piece_values = {
@@ -61,17 +60,16 @@ class MinimaxAgent:
         """
         Get the next move from our fixed opening sequence based on whose turn it is.
         """
-        if self.move_count < 7:  # First 7 moves from opening book
+        if board.fullmove_number <= 7:  # First 7 moves from opening book
             # Choose the appropriate move list based on which color is to move
             if board.turn == chess.WHITE:
-                move_uci = self.opening_moves_white[self.move_count]
+                move_uci = self.opening_moves_white[board.fullmove_number - 1]
             else:
-                move_uci = self.opening_moves_black[self.move_count]
+                move_uci = self.opening_moves_black[board.fullmove_number - 1]
             
             move = chess.Move.from_uci(move_uci)
             
             if move in board.legal_moves:
-                self.move_count += 1
                 return move
         
         return None
@@ -173,7 +171,7 @@ class MinimaxAgent:
             return None
 
         # --- ENFORCE OPENING BOOK ---
-        if self.move_count < 7:
+        if board.fullmove_number <= 7:
             opening_move = self.get_opening_move(board)
             if opening_move:
                 print(f"Agent plays '{opening_move.uci()}' from its opening book.")
