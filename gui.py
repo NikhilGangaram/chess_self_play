@@ -6,7 +6,6 @@ from PyQt6.QtGui import QMouseEvent
 import chess
 import chess.svg
 from agents.minimax_agent import MinimaxAgent
-from agents.mcts_agent import MCTSAgent
 
 class ClickableSvgWidget(QSvgWidget):
     def __init__(self, parent=None):
@@ -51,8 +50,7 @@ class ChessGUI(QMainWindow):
         self.ai_white = None
         self.ai_black = None
         self.agent_types = {
-            "Minimax Agent": {"class": MinimaxAgent, "params": {"depth": 5}},
-            "MCTS Agent": {"class": MCTSAgent, "params": {"time_limit": 3.0, "max_iterations": 5000}}
+            "Minimax Agent": {"class": MinimaxAgent, "params": {"depth": 5}}
         }
         self.selected_agent = "Minimax Agent"
         self.selected_agent_white = "Minimax Agent"
